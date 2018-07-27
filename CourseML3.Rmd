@@ -1,0 +1,93 @@
+---
+title: "Course Project ML"
+output:
+  pdf_document: default
+  html_document: default
+---
+Prediction Assignment Writeup. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+## Loading and reading the data
+```{r loading, echo=TRUE, cache= TRUE, warning=FALSE, include= TRUE}
+library(RANN)
+set.seed(1931)
+traindata <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testdata<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(traindata, destfile = "./pml-training.csv")
+download.file(testdata, destfile = "./pml-testing.csv")
+
+##read data replacing white spaces with "NA"
+training <- read.table("pml-training.csv", header = TRUE, sep = ",", na.strings=c("","NA"))
+testing <- read.table("pml-testing.csv", header = TRUE, sep = ",", na.strings=c("","NA"))
+
+##output data frame dimensions
+dim(training) 
+dim(testing) 
+```
+
+## Preprocess training set
+Source data shows a a lot of missing values, por instance the variable max_roll_forearm:
+```{r missing, echo=TRUE}
+sum(is.na(training$max_roll_forearm))
+```
+
+We'll choose an arbitrary threshold (85%) and remove variables that have more than that percentage of NAs.
+
+```{r clean, echo=TRUE}
+##clean training set
+cleantr <- training[, colMeans(is.na(training)) <= .15]
+dim(cleantr)
+```
+
+We'll additionally remove predictors which are highly correlated (at or above Spearman's rho of 0.8), considerably reducing the number of predictors to 42.
+
+```{r corr, echo=TRUE, warning=FALSE}
+library(caret)
+##clean training set
+intermDF<- cleantr[,-c(1:6, 60)] ##remove non numeric variables
+corintermDf<- cor(intermDF) #calculate correlations
+highCor <- findCorrelation(corintermDf, cutoff=0.8) #set the cut off point at 0.8
+CleanTraining <- cleantr[,-c(highCor)]
+CleanTraining <- CleanTraining[,-c(1:5)]
+dim(CleanTraining)
+```
+
+###Preprocess test set
+The test set needs to be cleaned up so the variables match those left in the training set. We'll remove the variables from the testing set that were removed from the training set:
+
+```{r cleante, echo=TRUE}
+cols_to_keep <- intersect(colnames(CleanTraining),colnames(testing)) # store matching columns
+CleanTraining <- CleanTraining[,cols_to_keep, drop=FALSE] # keep matching columns in training set
+CleanTest <- testing[,cols_to_keep, drop=FALSE] # keep matching columns in test set
+CleanTraining$classe<- training$classe # add a column with the outcome variable
+CleanTest$classe<- testing$classe # add a column with the outcome variable
+```
+
+##Data splitting
+We split our preprocessed training data 80/20 into training and test sets:
+
+```{r split, echo=TRUE}
+inTrain<- createDataPartition(y=CleanTraining$classe, p= 0.80, list=FALSE)
+train_data<- CleanTraining[inTrain,]
+test_data <-CleanTraining[-inTrain,]
+```
+
+##Fit a Random Forest
+
+A random forest is a reasonable preliminary choice given the outcome is five categorical variables
+```{r fit, echo=TRUE, cache=TRUE}
+modelFit<- train(classe~.,method="rf", data= train_data, ntree=500)
+modelFit$finalModel
+```
+
+We now see how it performs on the test set, i.e, its out of sample error. As shown below, the classification accuracy is very good. We'll therefore use it for our prediction exercise
+
+```{r predict, echo=TRUE, cache=TRUE}
+modelPredict<- predict(modelFit, newdata= test_data)
+confuMat<- confusionMatrix(modelPredict, test_data$classe)
+print(confuMat)
+```
+
+##Predict on the testing data frame
+```{r predict2, echo=TRUE, cache=TRUE}
+predictTest <- predict(modelFit, newdata= CleanTest)
+print(predictTest)
+```
